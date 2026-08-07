@@ -15,8 +15,15 @@ From the project root on your Mac:
 This syncs the code to `ewoolery@192.168.7.34:/home/ewoolery/tesla-energy-dashboard`,
 copies your local `.env` and `energy.sqlite3` (so the Pi inherits the existing
 OAuth tokens — no re-authorization needed), enables the background sampler
-(`SAMPLE_INTERVAL_SECONDS=60`), builds a venv, and installs + starts the
+(`SAMPLE_INTERVAL_SECONDS=600`), builds a venv, and installs + starts the
 `tesla-energy-dashboard` systemd service listening on `0.0.0.0:8000`.
+
+**API cost:** Tesla bills data requests at ~$0.002 each with a $10/month free
+credit. The 10-minute poll interval (`600`) keeps usage inside that credit
+(~4,400 requests/month ≈ free). Dropping to 60s would run ~$75+/month, so keep
+the interval at 300s or higher unless your developer.tesla.com usage shows the
+energy endpoints are cheaper for you. The dashboard also pauses its own polling
+when the browser tab is hidden.
 
 Open **http://192.168.7.34:8000** on any device on the home network.
 

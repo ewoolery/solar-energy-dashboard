@@ -26,11 +26,13 @@ if [ -f "${HERE}/energy.sqlite3" ]; then
   scp "${HERE}/energy.sqlite3" "${PI_HOST}:${APP_DIR}/energy.sqlite3"
 fi
 
-echo "==> Enabling the background sampler in the Pi's .env"
+# 600s (10 min) keeps request volume inside Tesla's $10/mo free API credit.
+# Shorter intervals cost ~$0.002 per poll; 60s would run ~$75+/mo.
+echo "==> Enabling the background sampler in the Pi's .env (600s)"
 ssh "${PI_HOST}" "cd '${APP_DIR}' && \
   if grep -q '^SAMPLE_INTERVAL_SECONDS=' .env; then \
-    sed -i 's/^SAMPLE_INTERVAL_SECONDS=.*/SAMPLE_INTERVAL_SECONDS=60/' .env; \
-  else echo 'SAMPLE_INTERVAL_SECONDS=60' >> .env; fi"
+    sed -i 's/^SAMPLE_INTERVAL_SECONDS=.*/SAMPLE_INTERVAL_SECONDS=600/' .env; \
+  else echo 'SAMPLE_INTERVAL_SECONDS=600' >> .env; fi"
 
 echo "==> Creating venv and installing (uses piwheels; first run is slow)"
 ssh "${PI_HOST}" "cd '${APP_DIR}' && \

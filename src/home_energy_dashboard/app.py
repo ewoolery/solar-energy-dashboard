@@ -116,11 +116,15 @@ async def _call(fn: Callable[[TeslaClient], Awaitable[Any]]) -> Any:
         raise HTTPException(exc.response.status_code, "Tesla API request failed") from exc
 
 
-async def _resolve_site(client: TeslaClient) -> tuple[int, dict[str, Any]]:
-    """Return (energy_site_id, live_status) for the first solar/Powerwall site."""
+async def _resolve_site_id(client: TeslaClient) -> int:
+    """Return the first solar/Powerwall energy_site_id, discovering once then caching.
+
+    Discovery probes live_status to pick the right site; afterwards the id is
+    cached, so routine polls cost a single request and never re-run discovery.
+    """
     global _site_id
     if _site_id is not None:
-        return _site_id, await client.live_status(_site_id)
+        return _site_id
     sites = await client.energy_sites()
     if not sites:
         raise HTTPException(404, "No Tesla energy site was found")
@@ -132,7 +136,7 @@ async def _resolve_site(client: TeslaClient) -> tuple[int, dict[str, Any]]:
             for field in ("solar_power", "load_power", "battery_power", "percentage_charged")
         ):
             _site_id = candidate
-            return candidate, raw
+            return candidate
     raise HTTPException(404, "No Tesla solar or Powerwall site was found")
 
 
@@ -170,7 +174,8 @@ async def callback(code: str, state: str) -> RedirectResponse:
 async def _sample_once() -> dict:
     """Fetch one live_status reading and persist it."""
     async def op(client: TeslaClient) -> dict:
-        site_id, raw = await _resolve_site(client)
+        site_id = await _resolve_site_id(client)
+        raw = await client.live_status(site_id)
         sample = normalize_live_status(raw)
         storage.save_sample(site_id, sample)
         return {"energy_site_id": site_id, "sample": sample.as_dict()}
@@ -186,7 +191,7 @@ async def live() -> dict:
 @app.get("/api/today")
 async def today() -> dict:
     async def op(client: TeslaClient) -> dict:
-        site_id, _ = await _resolve_site(client)
+        site_id = await _resolve_site_id(client)
         history = await client.calendar_history(
             site_id, kind="energy", period="day", time_zone=settings.timezone
         )
@@ -350,20 +355,26 @@ async function getJSON(url){
   return d;
 }
 
-async function loadAll(){
+let _tick = 0;
+async function loadAll(withToday){
   $('status').textContent = '';
   try{
-    const live = await getJSON('/api/live');
-    renderLive(live);
-    // Totals + economics are best-effort; a failure here shouldn't blank live.
-    try{ renderToday((await getJSON('/api/today')).totals); }catch(e){}
+    renderLive(await getJSON('/api/live'));
+    // /api/economics is computed locally (no Tesla request) — cheap to refresh.
     try{ renderValue((await getJSON('/api/economics')).economics); }catch(e){}
+    // /api/today costs a Tesla API request, so only refresh it periodically.
+    if(withToday){ try{ renderToday((await getJSON('/api/today')).totals); }catch(e){} }
     $('updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
-  }catch(e){
-    $('status').textContent = e.message;
-  }
+  }catch(e){ $('status').textContent = e.message; }
 }
 
-if({{CONNECTED}}){ loadAll(); setInterval(loadAll, 30000); }
+// Poll only while the tab is visible, so a forgotten open tab can't quietly
+// rack up Tesla API charges. Refresh the paid 'today' call every 5th tick.
+function tick(){ if(document.hidden) return; loadAll(_tick % 5 === 0); _tick++; }
+if({{CONNECTED}}){
+  tick();
+  setInterval(tick, 60000);
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) tick(); });
+}
 </script>
 </div></body></html>"""
