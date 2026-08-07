@@ -19,6 +19,7 @@ class Settings:
         "TESLA_API_BASE_URL", "https://fleet-api.prd.na.vn.cloud.tesla.com"
     )
     database_path: str = os.getenv("DATABASE_PATH", "energy.sqlite3")
+    timezone: str = os.getenv("TIMEZONE", "America/Los_Angeles")
 
     @property
     def oauth_ready(self) -> bool:

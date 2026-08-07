@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -24,6 +25,82 @@ class LiveSample:
 
     def as_dict(self) -> dict[str, float]:
         return asdict(self)
+
+
+def stamp_expiry(tokens: dict[str, Any], previous: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Return a copy of a token payload with an absolute ``expires_at`` (UTC ISO).
+
+    Tesla returns a relative ``expires_in`` (seconds). A refresh response may omit
+    ``refresh_token``; in that case we keep the prior one so the chain survives.
+    """
+    stamped = dict(tokens)
+    expires_in = int(tokens.get("expires_in", 0) or 0)
+    stamped["expires_at"] = (
+        datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+    ).isoformat()
+    if not stamped.get("refresh_token") and previous:
+        stamped["refresh_token"] = previous.get("refresh_token")
+    return stamped
+
+
+def is_expired(tokens: dict[str, Any], skew: int = 60) -> bool:
+    """True if the access token is missing/expired (``skew`` seconds of safety)."""
+    expires_at = tokens.get("expires_at")
+    if not expires_at:
+        return True
+    deadline = datetime.fromisoformat(expires_at) - timedelta(seconds=skew)
+    return datetime.now(timezone.utc) >= deadline
+
+
+def summarize_energy_history(payload: dict[str, Any]) -> dict[str, float]:
+    """Aggregate a ``calendar_history`` (kind=energy) response into kWh totals.
+
+    Tesla reports cumulative Wh fields per time bucket; we sum the buckets and
+    convert to kWh, preserving the same sign convention documented in rates.py.
+    """
+    buckets = (payload or {}).get("time_series") or []
+
+    def total(*keys: str) -> float:
+        return sum(
+            float(bucket.get(key, 0) or 0)
+            for bucket in buckets
+            for key in keys
+        ) / 1000.0
+
+    solar = total("solar_energy_exported")
+    battery_charged = total(
+        "battery_energy_imported_from_grid",
+        "battery_energy_imported_from_solar",
+        "battery_energy_imported_from_generator",
+    )
+    battery_discharged = total("battery_energy_exported")
+    grid_imported = total("grid_energy_imported")
+    grid_exported = total(
+        "grid_energy_exported_from_solar",
+        "grid_energy_exported_from_battery",
+        "grid_energy_exported_from_generator",
+    )
+    # Home consumption = everything delivered to the home from each source.
+    home = total(
+        "consumer_energy_imported_from_grid",
+        "consumer_energy_imported_from_solar",
+        "consumer_energy_imported_from_battery",
+        "consumer_energy_imported_from_generator",
+    )
+    self_powered = (
+        round(max(0.0, min(1.0, (home - grid_imported) / home)) * 100, 1)
+        if home > 0
+        else 0.0
+    )
+    return {
+        "solar_kwh": round(solar, 2),
+        "home_kwh": round(home, 2),
+        "grid_imported_kwh": round(grid_imported, 2),
+        "grid_exported_kwh": round(grid_exported, 2),
+        "battery_charged_kwh": round(battery_charged, 2),
+        "battery_discharged_kwh": round(battery_discharged, 2),
+        "self_powered_pct": self_powered,
+    }
 
 
 def authorization_url(settings: Settings, state: str) -> str:
@@ -68,7 +145,7 @@ class TeslaClient:
             response.raise_for_status()
             return response.json()
 
-    async def get(self, path: str) -> Any:
+    async def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
         if not self.access_token:
             raise RuntimeError("Tesla access token is missing")
         headers = {
@@ -77,7 +154,7 @@ class TeslaClient:
         }
         url = f"{self.settings.api_base_url.rstrip('/')}{path}"
         async with httpx.AsyncClient(timeout=20) as client:
-            response = await client.get(url, headers=headers)
+            response = await client.get(url, headers=headers, params=params)
             response.raise_for_status()
             return response.json().get("response")
 
@@ -91,6 +168,20 @@ class TeslaClient:
 
     async def live_status(self, energy_site_id: int) -> dict[str, Any]:
         return await self.get(f"/api/1/energy_sites/{energy_site_id}/live_status")
+
+    async def calendar_history(
+        self,
+        energy_site_id: int,
+        kind: str = "energy",
+        period: str = "day",
+        time_zone: str | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {"kind": kind, "period": period}
+        if time_zone:
+            params["time_zone"] = time_zone
+        return await self.get(
+            f"/api/1/energy_sites/{energy_site_id}/calendar_history", params
+        )
 
 
 def normalize_live_status(payload: dict[str, Any]) -> LiveSample:

@@ -56,6 +56,28 @@ class Storage:
             ).fetchone()
         return json.loads(row["payload"]) if row else None
 
+    def recent_samples(self, limit: int = 240) -> list[dict[str, Any]]:
+        """Most recent samples, oldest first (for history / sparklines)."""
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT sampled_at, solar_kw, home_kw, grid_kw, battery_kw,
+                          battery_soc
+                     FROM samples ORDER BY id DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+        return [dict(row) for row in reversed(rows)]
+
+    def samples_since(self, iso_utc: str) -> list[dict[str, Any]]:
+        """All samples at or after an ISO-8601 UTC timestamp, oldest first."""
+        with self.connect() as db:
+            rows = db.execute(
+                """SELECT sampled_at, solar_kw, home_kw, grid_kw, battery_kw,
+                          battery_soc
+                     FROM samples WHERE sampled_at >= ? ORDER BY id ASC""",
+                (iso_utc,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def save_sample(self, energy_site_id: int, sample: LiveSample) -> None:
         with self.connect() as db:
             db.execute(
