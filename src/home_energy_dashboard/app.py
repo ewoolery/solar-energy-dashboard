@@ -247,8 +247,9 @@ header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-be
 h1{font-family:var(--display);font-size:48px;line-height:1.1;letter-spacing:-0.02em;
   font-weight:600;margin:0;}
 .sub{color:var(--dim);margin:0 0 32px;font-size:16px;}
-.cta{display:inline-block;background:var(--signal);color:var(--ink);font-family:var(--body);
-  font-size:16px;font-weight:600;border:0;border-radius:9999px;padding:12px 24px;
+.cta{display:inline-flex;align-items:center;justify-content:center;line-height:1;
+  background:var(--signal);color:var(--ink);font-family:var(--body);
+  font-size:16px;font-weight:600;border:0;border-radius:9999px;padding:14px 24px;
   cursor:pointer;text-decoration:none;transition:background .12s var(--ease);}
 .cta:hover{background:var(--signal-bright);}
 .hint{color:var(--dim);} code{font-family:var(--mono);font-size:0.85em;color:var(--text);}
