@@ -23,6 +23,12 @@ class Settings:
     # Seconds between background live samples. 0 disables the poller (the
     # default, for local dev); a headless deployment sets e.g. 60.
     sample_interval_seconds: int = int(os.getenv("SAMPLE_INTERVAL_SECONDS", "0") or 0)
+    # ntfy.sh push notification for "Powerwall full". Leave topic blank to
+    # disable. Fires once when SOC crosses full_pct, re-arms below rearm_pct.
+    ntfy_server: str = os.getenv("NTFY_SERVER", "https://ntfy.sh")
+    ntfy_topic: str = os.getenv("NTFY_TOPIC", "")
+    battery_full_pct: float = float(os.getenv("BATTERY_FULL_PCT", "99.5") or 99.5)
+    battery_rearm_pct: float = float(os.getenv("BATTERY_REARM_PCT", "95") or 95)
 
     @property
     def oauth_ready(self) -> bool:

@@ -13,8 +13,10 @@ import httpx
 
 from . import rates
 from .config import settings
+from .notify import full_edge, send_ntfy
 from .storage import Storage
 from .tesla import (
+    LiveSample,
     TeslaClient,
     authorization_url,
     is_expired,
@@ -33,6 +35,8 @@ oauth_states: set[str] = set()
 # Discovered once, then reused so every request doesn't re-scan /products.
 _site_id: int | None = None
 _sampler_task: asyncio.Task | None = None
+# Battery-full alert edge state; starts armed so the first fill notifies.
+_battery_armed: bool = True
 
 
 @app.on_event("startup")
@@ -171,6 +175,28 @@ async def callback(code: str, state: str) -> RedirectResponse:
 
 
 # --- Data endpoints ----------------------------------------------------------
+async def _maybe_notify_full(sample: LiveSample) -> None:
+    """Fire a one-shot push when the Powerwall reaches full charge."""
+    global _battery_armed
+    should_notify, _battery_armed = full_edge(
+        sample.battery_soc,
+        _battery_armed,
+        settings.battery_full_pct,
+        settings.battery_rearm_pct,
+    )
+    if should_notify:
+        await send_ntfy(
+            settings,
+            title="Powerwall full",
+            message=(
+                f"Powerwall at {sample.battery_soc:.0f}% — good time to "
+                f"plug in the Mach-E (solar {sample.solar_kw:.1f} kW, "
+                f"home {sample.home_kw:.1f} kW)."
+            ),
+            tags="battery,car",
+        )
+
+
 async def _sample_once() -> dict:
     """Fetch one live_status reading and persist it."""
     async def op(client: TeslaClient) -> dict:
@@ -178,6 +204,7 @@ async def _sample_once() -> dict:
         raw = await client.live_status(site_id)
         sample = normalize_live_status(raw)
         storage.save_sample(site_id, sample)
+        await _maybe_notify_full(sample)
         return {"energy_site_id": site_id, "sample": sample.as_dict()}
 
     return await _call(op)
