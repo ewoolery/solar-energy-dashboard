@@ -20,6 +20,9 @@ class Settings:
     )
     database_path: str = os.getenv("DATABASE_PATH", "energy.sqlite3")
     timezone: str = os.getenv("TIMEZONE", "America/Los_Angeles")
+    # Seconds between background live samples. 0 disables the poller (the
+    # default, for local dev); a headless deployment sets e.g. 60.
+    sample_interval_seconds: int = int(os.getenv("SAMPLE_INTERVAL_SECONDS", "0") or 0)
 
     @property
     def oauth_ready(self) -> bool:

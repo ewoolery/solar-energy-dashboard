@@ -1,0 +1,16 @@
+[Unit]
+Description=Tesla Energy Dashboard (read-only Powerwall/solar)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ewoolery
+WorkingDirectory=/home/ewoolery/tesla-energy-dashboard
+# .env in WorkingDirectory is loaded by python-dotenv at startup.
+ExecStart=/home/ewoolery/tesla-energy-dashboard/.venv/bin/uvicorn home_energy_dashboard.app:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

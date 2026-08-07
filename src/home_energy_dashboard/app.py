@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import secrets
 from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
@@ -22,17 +24,46 @@ from .tesla import (
 )
 
 
+logger = logging.getLogger("home_energy_dashboard")
+
 app = FastAPI(title="Home Energy Dashboard")
 storage = Storage(settings.database_path)
 oauth_states: set[str] = set()
 
 # Discovered once, then reused so every request doesn't re-scan /products.
 _site_id: int | None = None
+_sampler_task: asyncio.Task | None = None
 
 
 @app.on_event("startup")
-def startup() -> None:
+async def startup() -> None:
     storage.initialize()
+    global _sampler_task
+    if settings.sample_interval_seconds > 0:
+        _sampler_task = asyncio.create_task(_sampler_loop())
+        logger.info("Background sampler every %ss", settings.sample_interval_seconds)
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    if _sampler_task:
+        _sampler_task.cancel()
+
+
+async def _sampler_loop() -> None:
+    """Poll live status on an interval so history/economics accrue headless."""
+    interval = settings.sample_interval_seconds
+    while True:
+        try:
+            await _sample_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # never let one bad poll kill the loop
+            logger.warning("Background sample failed: %s", exc)
+        try:
+            await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            raise
 
 
 # --- Auth helpers ------------------------------------------------------------
@@ -136,8 +167,8 @@ async def callback(code: str, state: str) -> RedirectResponse:
 
 
 # --- Data endpoints ----------------------------------------------------------
-@app.get("/api/live")
-async def live() -> dict:
+async def _sample_once() -> dict:
+    """Fetch one live_status reading and persist it."""
     async def op(client: TeslaClient) -> dict:
         site_id, raw = await _resolve_site(client)
         sample = normalize_live_status(raw)
@@ -145,6 +176,11 @@ async def live() -> dict:
         return {"energy_site_id": site_id, "sample": sample.as_dict()}
 
     return await _call(op)
+
+
+@app.get("/api/live")
+async def live() -> dict:
+    return await _sample_once()
 
 
 @app.get("/api/today")
