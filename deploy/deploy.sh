@@ -9,8 +9,8 @@
 #
 set -euo pipefail
 
-PI_HOST="${PI_HOST:-ewoolery@192.168.7.34}"
-APP_DIR="${APP_DIR:-/home/ewoolery/tesla-energy-dashboard}"  # must match the .service file
+PI_HOST="${PI_HOST:-pi@raspberrypi.local}"              # set for your own Pi
+APP_DIR="${APP_DIR:-/home/pi/tesla-energy-dashboard}"  # must match the .service file
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 echo "==> Syncing code to ${PI_HOST}:${APP_DIR}"
@@ -47,5 +47,5 @@ ssh -t "${PI_HOST}" "sudo cp '${APP_DIR}/deploy/tesla-energy-dashboard.service' 
   sleep 2 && sudo systemctl status tesla-energy-dashboard.service --no-pager | head -14"
 
 echo ""
-echo "==> Done. Dashboard: http://192.168.7.34:8000"
+echo "==> Done. Dashboard: http://${PI_HOST#*@}:8000"
 echo "    Logs:  ssh ${PI_HOST} 'journalctl -u tesla-energy-dashboard -f'"
