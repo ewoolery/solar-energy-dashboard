@@ -29,6 +29,10 @@ class Settings:
     ntfy_topic: str = os.getenv("NTFY_TOPIC", "")
     battery_full_pct: float = float(os.getenv("BATTERY_FULL_PCT", "99.5") or 99.5)
     battery_rearm_pct: float = float(os.getenv("BATTERY_REARM_PCT", "95") or 95)
+    # "Safe to plug in" heads-up while charging up — crossing this SOC usually
+    # means the car can charge and the Powerwall will still finish topping off.
+    battery_half_pct: float = float(os.getenv("BATTERY_HALF_PCT", "50") or 50)
+    battery_half_rearm_pct: float = float(os.getenv("BATTERY_HALF_REARM_PCT", "40") or 40)
 
     @property
     def oauth_ready(self) -> bool:

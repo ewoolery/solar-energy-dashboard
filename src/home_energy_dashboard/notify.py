@@ -17,19 +17,21 @@ from .config import Settings
 logger = logging.getLogger("home_energy_dashboard")
 
 
-def full_edge(
-    soc: float, armed: bool, full_pct: float = 99.5, rearm_pct: float = 95.0
+def rising_edge(
+    soc: float, armed: bool, threshold_pct: float, rearm_pct: float
 ) -> tuple[bool, bool]:
-    """Decide whether to fire a battery-full alert (pure, for easy testing).
+    """Decide whether to fire a one-shot SOC alert (pure, for easy testing).
 
     Returns ``(should_notify, new_armed)``. The alert fires once on the rising
-    edge into ``full_pct`` and does not fire again until SOC has dropped back
-    below ``rearm_pct`` — so a Powerwall sitting at 100% produces one alert.
+    edge up through ``threshold_pct`` and does not fire again until SOC has
+    dropped back below ``rearm_pct`` — so a battery sitting above the threshold
+    produces a single alert, and it re-arms on the next discharge. Used for both
+    the "full" (≈100%) and the "safe to plug in" (≈50%) notifications.
     """
     if soc < rearm_pct:
         return (False, True)          # discharged enough — re-arm
-    if armed and soc >= full_pct:
-        return (True, False)          # crossed full while armed — fire, disarm
+    if armed and soc >= threshold_pct:
+        return (True, False)          # crossed threshold while armed — fire, disarm
     return (False, armed)             # no change
 
 

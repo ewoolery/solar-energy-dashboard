@@ -13,7 +13,7 @@ import httpx
 
 from . import rates
 from .config import settings
-from .notify import full_edge, send_ntfy
+from .notify import rising_edge, send_ntfy
 from .storage import Storage
 from .tesla import (
     LiveSample,
@@ -35,8 +35,9 @@ oauth_states: set[str] = set()
 # Discovered once, then reused so every request doesn't re-scan /products.
 _site_id: int | None = None
 _sampler_task: asyncio.Task | None = None
-# Battery-full alert edge state; starts armed so the first fill notifies.
-_battery_armed: bool = True
+# Battery alert edge state; each starts armed so the first crossing notifies.
+_battery_armed: bool = True        # ≈100% "Powerwall full"
+_battery_half_armed: bool = True   # ≈50% "safe to plug in"
 
 
 @app.on_event("startup")
@@ -175,23 +176,38 @@ async def callback(code: str, state: str) -> RedirectResponse:
 
 
 # --- Data endpoints ----------------------------------------------------------
-async def _maybe_notify_full(sample: LiveSample) -> None:
-    """Fire a one-shot push when the Powerwall reaches full charge."""
-    global _battery_armed
-    should_notify, _battery_armed = full_edge(
-        sample.battery_soc,
-        _battery_armed,
-        settings.battery_full_pct,
-        settings.battery_rearm_pct,
+async def _maybe_notify(sample: LiveSample) -> None:
+    """Fire one-shot pushes as the Powerwall climbs past its alert thresholds."""
+    global _battery_armed, _battery_half_armed
+    soc = sample.battery_soc
+    context = f"(solar {sample.solar_kw:.1f} kW, home {sample.home_kw:.1f} kW)"
+
+    # ≈50%: enough headroom to charge the car and still top off the Powerwall.
+    fire_half, _battery_half_armed = rising_edge(
+        soc, _battery_half_armed, settings.battery_half_pct, settings.battery_half_rearm_pct
     )
-    if should_notify:
+    if fire_half:
+        await send_ntfy(
+            settings,
+            title="Powerwall at 50%",
+            message=(
+                f"Powerwall at {soc:.0f}% and climbing — you can plug in the "
+                f"Mach-E now and still finish charging the Powerwall {context}."
+            ),
+            tags="battery,car",
+        )
+
+    # ≈100%: fully charged, surplus solar is now free to send to the car.
+    fire_full, _battery_armed = rising_edge(
+        soc, _battery_armed, settings.battery_full_pct, settings.battery_rearm_pct
+    )
+    if fire_full:
         await send_ntfy(
             settings,
             title="Powerwall full",
             message=(
-                f"Powerwall at {sample.battery_soc:.0f}% — good time to "
-                f"plug in the Mach-E (solar {sample.solar_kw:.1f} kW, "
-                f"home {sample.home_kw:.1f} kW)."
+                f"Powerwall at {soc:.0f}% — good time to plug in the "
+                f"Mach-E {context}."
             ),
             tags="battery,car",
         )
@@ -204,7 +220,7 @@ async def _sample_once() -> dict:
         raw = await client.live_status(site_id)
         sample = normalize_live_status(raw)
         storage.save_sample(site_id, sample)
-        await _maybe_notify_full(sample)
+        await _maybe_notify(sample)
         return {"energy_site_id": site_id, "sample": sample.as_dict()}
 
     return await _call(op)
